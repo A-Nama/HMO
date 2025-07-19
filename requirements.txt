@@ -7,3 +7,4 @@ python-multipart
 supabase
 reportlab
 httpx
+fpdf 
