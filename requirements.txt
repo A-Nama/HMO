@@ -6,5 +6,4 @@ pydantic
 python-multipart
 supabase
 reportlab
-httpx
 fpdf 
