@@ -1,2 +1,1 @@
-# HMO
-HackGenAI
+# HMO (Hear Me Out)
