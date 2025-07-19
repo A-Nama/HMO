@@ -4,20 +4,17 @@ import asyncio
 import httpx
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi import Depends, Header
 from pydantic import BaseModel, Field
 from typing import List
 import google.generativeai as genai
 from dotenv import load_dotenv
 from supabase import create_client, Client
-import io
-from urllib.parse import quote
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.utils import ImageReader
-from reportlab.platypus import Paragraph
-from reportlab.lib.styles import getSampleStyleSheet
+from fpdf import FPDF
+from datetime import datetime
+from io import BytesIO
 import uuid
+
 
 # --- Environment Variable Setup ---
 load_dotenv()
@@ -28,10 +25,23 @@ HUGGING_FACE_API_KEY = os.getenv("HUGGING_FACE_API_KEY")
 
 # --- FastAPI App Initialization ---
 app = FastAPI(
-    title="Pitch Deck PDF Generator & Viewer API",
-    description="An API to generate, save, and view pitch decks.",
-    version="4.0.0"
+    title="Pitch Deck Generator API",
+    description="An API that uses Google's Gemini to generate and save a pitch deck from a raw idea or audio.",
+    version="2.0.0"
 )
+
+async def verify_user(authorization: str = Header(...)):
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=403, detail="Invalid token format.")
+    token = authorization.split(" ")[1]
+
+    try:
+        user = supabase.auth.get_user(token)
+        if not user.user:
+            raise HTTPException(status_code=403, detail="Invalid or expired token.")
+        return user.user
+    except Exception as e:
+        raise HTTPException(status_code=403, detail="Unauthorized.")
 
 # --- CORS Configuration ---
 origins = ["http://localhost", "http://localhost:3000", "http://localhost:5173"]
@@ -97,34 +107,60 @@ async def _generate_image_for_slide(slide_content: str, client: httpx.AsyncClien
         response.raise_for_status()
         return response.content
     except Exception as e:
-        print(f"Hugging Face image generation failed: {e}")
-        fallback_url = f"https://placehold.co/800x400/EEE/31343C?text=AI+Image+Failed"
-        response = await client.get(fallback_url)
-        return response.content
+        raise HTTPException(status_code=500, detail=f"Error during deck generation: {str(e)}")
+    
+async def create_pdf_and_upload(deck: PitchDeckOutput, idea_text: str):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", size=14)
 
-def _create_pitch_deck_pdf(deck_content: dict, images: list) -> io.BytesIO:
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
-    styles = getSampleStyleSheet()
-    c.setFont("Helvetica-Bold", 36)
-    c.drawCentredString(width / 2.0, height - 150, deck_content['company_name'])
-    c.setFont("Helvetica", 18)
-    c.drawCentredString(width / 2.0, height - 200, deck_content['tagline'])
-    c.showPage()
-    for i, slide in enumerate(deck_content['slides']):
-        c.setFont("Helvetica-Bold", 24)
-        c.drawString(50, height - 100, slide['title'])
-        p = Paragraph(slide['content'], styles['Normal'])
-        p.wrapOn(c, width - 100, height - 450)
-        p.drawOn(c, 50, height - 350)
-        if i < len(images):
-            image_reader = ImageReader(io.BytesIO(images[i]))
-            c.drawImage(image_reader, 50, 80, width=width-100, height=200, preserveAspectRatio=True, anchor='n')
-        c.showPage()
-    c.save()
+    # Title slide
+    pdf.set_font("Arial", "B", 20)
+    pdf.cell(200, 10, txt=deck.company_name, ln=True, align="C")
+    pdf.set_font("Arial", "I", 14)
+    pdf.cell(200, 10, txt=deck.tagline, ln=True, align="C")
+    pdf.ln(10)
+
+    # Other slides
+    for slide_key in [
+        "problem", "solution", "product", "marketSize", "businessModel",
+        "goToMarket", "competition", "team", "financials", "theAsk"
+    ]:
+        slide = getattr(deck, slide_key)
+        pdf.set_font("Arial", "B", 16)
+        pdf.multi_cell(0, 10, txt=slide.title)
+        pdf.set_font("Arial", "", 12)
+        pdf.multi_cell(0, 10, txt=slide.content)
+        pdf.ln(5)
+
+    # Save to in-memory buffer
+    buffer = BytesIO()
+    pdf.output(buffer)
     buffer.seek(0)
-    return buffer
+
+    # Generate a unique filename
+    filename = f"{deck.company_name}_{uuid.uuid4().hex[:8]}.pdf"
+    storage_path = f"{filename}"
+
+    # Upload to Supabase
+    res = supabase.storage.from_("pitch_decks").upload(
+        path=storage_path,
+        file=buffer,
+        file_options={"content-type": "application/pdf", "cache-control": "3600"}
+    )
+
+    if res.get("error"):
+        raise HTTPException(status_code=500, detail=f"Supabase Storage error: {res['error']['message']}")
+
+    # Get public URL
+    public_url = supabase.storage.from_("pitch_decks").get_public_url(storage_path)
+
+    return {
+        "pdf_url": public_url,
+        "storage_path": storage_path
+    }
+
 
 # --- API Endpoints ---
 
@@ -181,38 +217,53 @@ async def generate_and_save_deck(audio_file: UploadFile = File(...)):
 
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/decks", tags=["Pitch Decks"])
-async def get_all_decks():
-    """Retrieves a list of all saved pitch decks."""
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Database connection not available.")
+        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+    
+@app.post("/generate-from-text", response_model=PitchDeckOutput, tags=["Pitch Deck Generation"])
+async def generate_from_text(payload: IdeaInput):
+    """
+    Accepts an idea in plain text and generates a pitch deck.
+    """
     try:
-        response = supabase.table("pitch_decks").select("*").order("created_at", desc=True).execute()
-        return response.data
+        deck_data = await _generate_deck_from_text(payload.idea)
+        deck_data['original_idea'] = payload.idea
+        return deck_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/decks/{deck_id}", tags=["Pitch Decks"])
-async def delete_deck(deck_id: int):
-    """Deletes a pitch deck from the database and its file from storage."""
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Database connection not available.")
+
+
+@app.post("/save-deck", tags=["Database"])
+async def save_deck(payload: SaveDeckInput, user=Depends(verify_user)):
+    """
+    Accepts a generated pitch deck and saves it to the Supabase database,
+    including uploading the PDF to Supabase Storage.
+    """
     try:
-        # First, find the record to get the storage path
-        select_res = supabase.table("pitch_decks").select("storage_path").eq("id", deck_id).execute()
-        if not select_res.data:
-            raise HTTPException(status_code=404, detail="Deck not found.")
-        
-        storage_path = select_res.data[0]['storage_path']
+        # Upload the PDF and get its URL and path
+        upload_info = await create_pdf_and_upload(payload.deck_data, payload.original_idea)
 
-        # Delete from storage
-        supabase.storage.from_("pitch_decks").remove([storage_path])
+        data_to_insert = {
+            "original_idea": payload.original_idea,
+            "company_name": payload.deck_data.company_name,
+            "tagline": payload.deck_data.tagline,
+            "pdf_url": upload_info["pdf_url"],
+            "storage_path": upload_info["storage_path"],
+        }
 
-        # Delete from database
-        supabase.table("pitch_decks").delete().eq("id", deck_id).execute()
-        
-        return {"status": "success", "message": f"Deck {deck_id} deleted."}
+        # Insert into Supabase
+        data, count = supabase.table('pitch_decks').insert(data_to_insert).execute()
+        response_data = data[1][0] if data and len(data[1]) > 0 else None
+
+        if not response_data:
+            raise HTTPException(status_code=500, detail="Failed to save data to Supabase.")
+
+        return {
+            "status": "success",
+            "message": "Deck saved and PDF uploaded successfully!",
+            "saved_id": response_data.get("id"),
+            "pdf_url": upload_info["pdf_url"]
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
