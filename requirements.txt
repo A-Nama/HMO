@@ -6,4 +6,5 @@ pydantic
 python-multipart
 supabase
 reportlab
+python-pptx
 fpdf 
