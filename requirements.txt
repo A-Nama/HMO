@@ -5,3 +5,5 @@ google-generativeai
 pydantic
 python-multipart
 supabase
+reportlab
+httpx

@@ -1,33 +1,40 @@
 import os
 import json
-from fastapi import FastAPI, HTTPException, Body, File, UploadFile
+import asyncio
+import httpx
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import Dict, Optional
+from typing import List
 import google.generativeai as genai
 from dotenv import load_dotenv
 from supabase import create_client, Client
+import io
+from urllib.parse import quote
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+import uuid
 
 # --- Environment Variable Setup ---
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+HUGGING_FACE_API_KEY = os.getenv("HUGGING_FACE_API_KEY")
 
 # --- FastAPI App Initialization ---
 app = FastAPI(
-    title="Pitch Deck Generator API",
-    description="An API that uses Google's Gemini to generate and save a pitch deck from a raw idea or audio.",
-    version="2.0.0"
+    title="Pitch Deck PDF Generator & Viewer API",
+    description="An API to generate, save, and view pitch decks.",
+    version="4.0.0"
 )
 
 # --- CORS Configuration ---
-origins = [
-    "http://localhost",
-    "http://localhost:3000",
-    "http://localhost:5173",
-    # Add your deployed frontend URL here
-]
+origins = ["http://localhost", "http://localhost:3000", "http://localhost:5173"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -37,155 +44,175 @@ app.add_middleware(
 )
 
 # --- API Client Initialization ---
-# Gemini
 if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY not found. Please set it in your .env file.")
+    raise ValueError("GEMINI_API_KEY not found in .env file.")
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Supabase
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("SUPABASE_URL or SUPABASE_KEY not found. Please set them in your .env file.")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+else:
+    supabase = None
+    print("FATAL: Supabase credentials not found. Application cannot function without them.")
 
 # --- Pydantic Models ---
-class IdeaInput(BaseModel):
-    idea: str = Field(..., min_length=20, description="The user's raw idea for a startup/project.")
-
 class PitchDeckSlide(BaseModel):
     title: str
     content: str
     
-class PitchDeckOutput(BaseModel):
+class PitchDeckContent(BaseModel):
     company_name: str
     tagline: str
-    problem: PitchDeckSlide
-    solution: PitchDeckSlide
-    product: PitchDeckSlide
-    marketSize: PitchDeckSlide
-    businessModel: PitchDeckSlide
-    goToMarket: PitchDeckSlide
-    competition: PitchDeckSlide
-    team: PitchDeckSlide
-    financials: PitchDeckSlide
-    theAsk: PitchDeckSlide
+    slides: List[PitchDeckSlide]
 
-class SaveDeckInput(BaseModel):
-    """Model for receiving the data to be saved to Supabase."""
-    original_idea: str
-    deck_data: PitchDeckOutput
+# --- AI & PDF Helper Functions (These remain the same) ---
 
-
-# --- AI Prompt Engineering ---
 def create_pitch_deck_prompt(idea_text: str) -> str:
-    # This function remains the same as before
     return f"""
-    You are an expert startup consultant named 'IdeaSpark'. Your task is to generate a comprehensive 10-slide pitch deck based on the user's raw idea.
-    The user's idea is: "{idea_text}"
-    You MUST return the output as a single, valid JSON object. Do not include any text, markdown formatting, or code fences before or after the JSON object.
-    The JSON object must strictly follow this structure:
-    {{
-      "company_name": "A creative and relevant name for the startup.", "tagline": "A short, powerful tagline.",
-      "problem": {{ "title": "The Problem", "content": "A compelling description of the problem." }},
-      "solution": {{ "title": "Our Solution", "content": "Clearly explain how you solve the problem." }},
-      "product": {{ "title": "Product / Service", "content": "Describe the product and its key features." }},
-      "marketSize": {{ "title": "Market Size", "content": "Estimate the market size (TAM, SAM, SOM)." }},
-      "businessModel": {{ "title": "Business Model", "content": "How will the company make money?" }},
-      "goToMarket": {{ "title": "Go-to-Market Strategy", "content": "How will you reach your target customers?" }},
-      "competition": {{ "title": "Competitive Landscape", "content": "Who are the main competitors and what is your advantage?" }},
-      "team": {{ "title": "The Team", "content": "Create plausible founder archetypes." }},
-      "financials": {{ "title": "Financial Projections", "content": "Provide a high-level 3-year projection." }},
-      "theAsk": {{ "title": "The Ask", "content": "State how much funding is being requested and for what." }}
-    }}
+    You are an expert startup consultant. Based on the user's idea: "{idea_text}", generate the content for a 10-slide pitch deck.
+    Return a single, valid JSON object with the structure: {{"company_name": "...", "tagline": "...", "slides": [{{"title": "...", "content": "..."}}]}}.
+    The 10 slides MUST be: 1. The Problem, 2. Our Solution, 3. Product/Service, 4. Market Size, 5. Business Model, 6. Go-to-Market Strategy, 7. Competitive Landscape, 8. The Team, 9. Financial Projections, 10. The Ask.
     """
 
-# --- Internal Helper Functions ---
-async def _generate_deck_from_text(idea_text: str) -> dict:
-    """Internal logic to generate a pitch deck from text."""
+async def _generate_deck_content(idea_text: str) -> dict:
     try:
         model = genai.GenerativeModel('gemini-pro')
         prompt = create_pitch_deck_prompt(idea_text)
-        response = model.generate_content(prompt)
+        response = await model.generate_content_async(prompt)
         response_text = response.text.strip().replace("```json", "").replace("```", "").strip()
         return json.loads(response_text)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="AI model returned invalid JSON.")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error during deck generation: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating text content: {e}")
 
+async def _generate_image_for_slide(slide_content: str, client: httpx.AsyncClient) -> bytes:
+    if not HUGGING_FACE_API_KEY:
+        raise ValueError("HUGGING_FACE_API_KEY not found. Please add it to your .env file.")
+    api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2-1-base"
+    headers = {"Authorization": f"Bearer {HUGGING_FACE_API_KEY}"}
+    image_prompt = f"A professional, minimalist, abstract vector art representing the concept of: {slide_content}"
+    try:
+        response = await client.post(api_url, headers=headers, json={"inputs": image_prompt}, timeout=120.0)
+        if response.status_code == 503:
+            await asyncio.sleep(15)
+            response = await client.post(api_url, headers=headers, json={"inputs": image_prompt}, timeout=120.0)
+        response.raise_for_status()
+        return response.content
+    except Exception as e:
+        print(f"Hugging Face image generation failed: {e}")
+        fallback_url = f"https://placehold.co/800x400/EEE/31343C?text=AI+Image+Failed"
+        response = await client.get(fallback_url)
+        return response.content
+
+def _create_pitch_deck_pdf(deck_content: dict, images: list) -> io.BytesIO:
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    styles = getSampleStyleSheet()
+    c.setFont("Helvetica-Bold", 36)
+    c.drawCentredString(width / 2.0, height - 150, deck_content['company_name'])
+    c.setFont("Helvetica", 18)
+    c.drawCentredString(width / 2.0, height - 200, deck_content['tagline'])
+    c.showPage()
+    for i, slide in enumerate(deck_content['slides']):
+        c.setFont("Helvetica-Bold", 24)
+        c.drawString(50, height - 100, slide['title'])
+        p = Paragraph(slide['content'], styles['Normal'])
+        p.wrapOn(c, width - 100, height - 450)
+        p.drawOn(c, 50, height - 350)
+        if i < len(images):
+            image_reader = ImageReader(io.BytesIO(images[i]))
+            c.drawImage(image_reader, 50, 80, width=width-100, height=200, preserveAspectRatio=True, anchor='n')
+        c.showPage()
+    c.save()
+    buffer.seek(0)
+    return buffer
 
 # --- API Endpoints ---
 
-@app.post("/generate-from-audio", response_model=PitchDeckOutput, tags=["Pitch Deck Generation"])
-async def generate_from_audio(audio_file: UploadFile = File(...)):
+@app.post("/decks", tags=["Pitch Decks"])
+async def generate_and_save_deck(audio_file: UploadFile = File(...)):
     """
-    Accepts an audio file, transcribes it, and generates a pitch deck.
-    This is the primary endpoint your frontend should use for audio input.
+    Generates a new pitch deck from audio, saves it to the database and
+    storage, and returns its metadata.
     """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database connection not available.")
     if not audio_file.content_type.startswith("audio/"):
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload an audio file.")
-        
+        raise HTTPException(status_code=400, detail="Invalid file type.")
+
     try:
-        # 1. Transcribe the audio using Gemini
-        # The 'gemini-1.5-flash' model is great for this kind of task
+        # Steps 1-4: Transcribe, Generate Content, Generate Images, Create PDF
         transcription_model = genai.GenerativeModel('gemini-1.5-flash')
         audio_bytes = await audio_file.read()
-        
-        # Upload the audio file to Google's servers for processing
-        uploaded_audio = genai.upload_file(
-            path="temp_audio_file", # Temporary name, path doesn't matter with content
-            display_name=audio_file.filename,
-            content=audio_bytes
-        )
-
-        prompt = "Transcribe this audio. It contains a startup idea. Capture the core concept clearly and concisely."
-        response = transcription_model.generate_content([prompt, uploaded_audio])
-        
-        if not response.text:
-             raise HTTPException(status_code=500, detail="Transcription failed. The model returned no text.")
-
+        uploaded_audio = genai.upload_file(path="temp_audio", content=audio_bytes)
+        response = await transcription_model.generate_content_async(["Transcribe this startup idea.", uploaded_audio])
         transcribed_idea = response.text.strip()
+
+        deck_content = await _generate_deck_content(transcribed_idea)
+
+        async with httpx.AsyncClient() as client:
+            image_tasks = [_generate_image_for_slide(slide['content'], client) for slide in deck_content['slides']]
+            images = await asyncio.gather(*image_tasks)
+
+        pdf_buffer = _create_pitch_deck_pdf(deck_content, images)
+        pdf_bytes = pdf_buffer.getvalue()
         
-        # 2. Generate the pitch deck from the transcribed text
-        deck_data = await _generate_deck_from_text(transcribed_idea)
+        # Step 5: Upload PDF to Supabase Storage
+        file_path = f"public/{uuid.uuid4()}.pdf"
+        # The bucket name is 'pitch_decks'
+        supabase.storage.from_("pitch_decks").upload(file=pdf_bytes, path=file_path, file_options={"content-type": "application/pdf"})
+
+        # Step 6: Get Public URL for the PDF
+        res = supabase.storage.from_("pitch_decks").get_public_url(file_path)
+        pdf_url = res
+
+        # Step 7: Save Metadata to Supabase Database
+        deck_to_save = {
+            "company_name": deck_content.get("company_name"),
+            "tagline": deck_content.get("tagline"),
+            "original_idea": transcribed_idea,
+            "pdf_url": pdf_url,
+            "storage_path": file_path
+        }
+        db_response = supabase.table("pitch_decks").insert(deck_to_save).execute()
         
-        # Add the transcribed text to the response for the frontend to use
-        deck_data['original_idea'] = transcribed_idea
-        
-        return deck_data
+        # Step 8: Return the newly created record
+        new_deck = db_response.data[0]
+        return JSONResponse(status_code=201, content=new_deck)
 
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        raise HTTPException(status_code=500, detail=f"An internal server error occurred: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.post("/save-deck", tags=["Database"])
-async def save_deck(payload: SaveDeckInput):
-    """
-    Accepts a generated pitch deck and saves it to the Supabase database.
-    """
+@app.get("/decks", tags=["Pitch Decks"])
+async def get_all_decks():
+    """Retrieves a list of all saved pitch decks."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database connection not available.")
     try:
-        data_to_insert = {
-            "original_idea": payload.original_idea,
-            "deck_data": payload.deck_data.model_dump() 
-        }
-        
-        # Insert data into the 'pitch_decks' table
-        data, count = supabase.table('pitch_decks').insert(data_to_insert).execute()
-        
-        # The response from execute() is a tuple (data, count)
-        response_data = data[1][0] if data and len(data[1]) > 0 else None
-        
-        if not response_data:
-            raise HTTPException(status_code=500, detail="Failed to save data to Supabase.")
-
-        return {"status": "success", "message": "Deck saved successfully!", "saved_id": response_data.get('id')}
-
+        response = supabase.table("pitch_decks").select("*").order("created_at", desc=True).execute()
+        return response.data
     except Exception as e:
-        print(f"Supabase save error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save to Supabase: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/decks/{deck_id}", tags=["Pitch Decks"])
+async def delete_deck(deck_id: int):
+    """Deletes a pitch deck from the database and its file from storage."""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database connection not available.")
+    try:
+        # First, find the record to get the storage path
+        select_res = supabase.table("pitch_decks").select("storage_path").eq("id", deck_id).execute()
+        if not select_res.data:
+            raise HTTPException(status_code=404, detail="Deck not found.")
+        
+        storage_path = select_res.data[0]['storage_path']
 
-@app.get("/", tags=["Health Check"])
-async def read_root():
-    return {"status": "ok", "message": "Welcome to the Pitch Deck Generator API v2!"}
+        # Delete from storage
+        supabase.storage.from_("pitch_decks").remove([storage_path])
+
+        # Delete from database
+        supabase.table("pitch_decks").delete().eq("id", deck_id).execute()
+        
+        return {"status": "success", "message": f"Deck {deck_id} deleted."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
