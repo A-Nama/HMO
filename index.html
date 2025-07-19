@@ -118,10 +118,10 @@
   </form>
 
   <!-- Gallery Modal (hidden by default) -->
-  <div id="galleryModal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:#fff; z-index:1000; overflow:auto;">
-    <div style="max-width:700px; margin:40px auto; padding:32px;">
+  <div id="galleryModal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:#d7d0c9; z-index:1000; overflow:auto;">
+    <div style="color:#fff ;max-width:700px; margin:40px auto; padding:32px;">
       <button onclick="closeGallery()" style="float:right; font-size:1.5rem; background:none; border:none; cursor:pointer;">&times;</button>
-      <h2>Your Ideas Gallery</h2>
+      <h2 style="color:#111;">Your Ideas Gallery</h2>
       <div id="galleryList" style="margin-top:24px;"></div>
     </div>
   </div>
@@ -225,10 +225,10 @@
           return;
         }
         galleryList.innerHTML = decks.map(deck => `
-          <div style="margin-bottom:18px; padding:16px; background:#f4f4f4; border-radius:12px;">
-            <strong>${deck.company_name || "Untitled"}</strong>
-            <div style="color:#666; margin:6px 0 8px 0;">${deck.tagline || ""}</div>
-            <a href="${deck.pdf_url}" target="_blank" style="color:#222; text-decoration:underline;">Download Deck</a>
+          <div style="margin-bottom:18px; padding:16px; background:#9a0002; border-radius:12px;">
+            <strong style="color:#fff;">${deck.company_name || "Untitled"}</strong>
+            <div style="color:#d7d0c9; margin:6px 0 8px 0;">${deck.tagline || ""}</div>
+            <a href="${deck.pdf_url}" target="_blank" style="color:#222; text-decoration:underline; font-weight:bold;">Download Deck</a>
           </div>
         `).join('');
       } catch {
