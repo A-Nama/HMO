@@ -12,7 +12,7 @@ Hear Me Out is a GenAI-powered tool that transforms fleeting voice or text ideas
 - Type out your idea if you prefer text
 - Transcription and content structuring using Gemini AI
 - Automatically organizes content into a 10-slide pitch deck
-- Converts the deck into a downloadable PDF
+- Converts the deck into a downloadable PPT
 - Uploads to Supabase storage
 - Returns a public link to the deck and stores metadata in a Supabase table
 
@@ -20,9 +20,8 @@ Hear Me Out is a GenAI-powered tool that transforms fleeting voice or text ideas
 
 **Backend**  
 - FastAPI (Python)  
-- Google Generative AI (Gemini Pro, Text & Audio)  
-- Hugging Face (for PDF formatting and conversion)  
-- Supabase (PostgreSQL Database and Storage)
+- Google Generative AI (Gemini Pro, Text & Audio)   
+- Supabase ( Database and Storage)
 
 **Frontend (Prototype)**  
 - Basic HTML + Tailwind CSS  
@@ -37,14 +36,13 @@ Hear Me Out is a GenAI-powered tool that transforms fleeting voice or text ideas
 2. The input is sent to Gemini AI to transcribe (if audio) and structure the content.
 3. A 10-slide pitch deck is generated.
 4. The content is formatted into a PDF.
-5. The PDF is uploaded to Supabase.
+5. The PPT is uploaded to Supabase.
 6. A public link is returned, and metadata is stored.
 
 ## Scalability and Future Scope
 
 - Multiple pitch deck templates based on context and tone
 - Google login and user authentication
-- Dashboard for accessing past pitch decks
 - Slide editing before PDF generation
 - Richer frontend for mobile and web platforms
 
