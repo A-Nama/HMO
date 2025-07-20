@@ -111,13 +111,44 @@
       text-align: center;
       font-family: 'Manrope', sans-serif;
     }
+    .idea-box {
+      position: relative;
+      margin-bottom: 18px;
+      padding: 16px 40px 16px 16px;
+      background: #9a0002;
+      border-radius: 12px;
+      min-height: 60px;
+    }
+    .delete-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      color: #fff;
+      font-size: 1.3rem;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    }
+    .delete-btn:hover {
+      opacity: 1;
+      color: #de6464;
+    }
+    .delete-btn svg {
+      width: 22px;
+      height: 22px;
+      vertical-align: middle;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <a href="#" class="gallery-link" onclick="showGallery()">Gallery</a>
   <div class="center-content">
     <button class="record-btn" id="recordBtn" title="Record Audio">
-      
+      <!-- You can add a mic icon here if you want -->
     </button>
     <div class="status" id="status"></div>
   </div>
@@ -143,7 +174,6 @@
     let mediaRecorder, audioChunks = [];
     const recordBtn = document.getElementById('recordBtn');
     const statusDiv = document.getElementById('status');
-    const micIcon = document.getElementById('micIcon');
 
     recordBtn.onclick = async function() {
       if (mediaRecorder && mediaRecorder.state === "recording") {
@@ -223,6 +253,20 @@
     function closeGallery() {
       document.getElementById('galleryModal').style.display = 'none';
     }
+
+    async function deleteDeck(deckId) {
+      if (!confirm("Delete this idea? This cannot be undone.")) return;
+      try {
+        const res = await fetch(`${BACKEND_URL}/decks/${deckId}`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) throw new Error(await res.text());
+        loadGallery();
+      } catch {
+        alert("Failed to delete idea.");
+      }
+    }
+
     async function loadGallery() {
       const galleryList = document.getElementById('galleryList');
       galleryList.innerHTML = "Loading...";
@@ -234,16 +278,28 @@
           return;
         }
         galleryList.innerHTML = decks.map(deck => `
-          <div style="margin-bottom:18px; padding:16px; background:#9a0002; border-radius:12px;">
+          <div class="idea-box">
+            <button class="delete-btn" title="Delete" onclick="deleteDeck(${deck.id})">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M3 6h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="2"/>
+                <rect x="5" y="6" width="14" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                <path d="M10 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M14 11v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
             <strong style="color:#fff;">${deck.company_name || "Untitled"}</strong>
             <div style="color:#d7d0c9; margin:6px 0 8px 0;">${deck.tagline || ""}</div>
-            <a href="${deck.pdf_url}" target="_blank" style="color:#222; text-decoration:underline; font-weight:bold;">Download Deck</a>
+            <a href="${deck.pdf_url}" target="_blank" style="color:#d7d0c9; text-decoration:underline; font-weight:bold; font-style:italic;">Download Deck</a>
           </div>
         `).join('');
       } catch {
         galleryList.innerHTML = "<p>Failed to load gallery.</p>";
       }
     }
+
+    // Make deleteDeck globally accessible for inline onclick
+    window.deleteDeck = deleteDeck;
   </script>
 </body>
 </html>
