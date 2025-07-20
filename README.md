@@ -64,4 +64,6 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
+Made with love by barbie.dev
+
 
