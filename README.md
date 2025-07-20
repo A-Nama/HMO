@@ -1,7 +1,6 @@
 # Hear Me Out
 
 **Team:** barbie.dev  
-**Built by:** Anjana Sankar
 
 ## About the Project
 
