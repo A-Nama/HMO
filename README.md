@@ -52,10 +52,10 @@ uvicorn main:app --reload
 
 
 
+## Project Demo
 
-## Project Demo Video (Optional)
-
-_Add a link to your video demo here (e.g., YouTube or Drive) that walks through how the app works end-to-end._
+Watch a walkthrough of how **Hear Me Out** works:  
+[▶️ Demo Video](https://drive.google.com/file/d/1f08eJhdZdkl7CmpXGVltFbmtL5Ci2Cad/view?usp=sharing)
 
 ---
 
