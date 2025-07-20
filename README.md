@@ -1,60 +1,39 @@
 # Hear Me Out
 
-**Team:** barbie.dev  
-**Track:** Media
+## Basic Details
 
-## About the Project
+- **Team Name:** barbie.dev  
+- **Team Members:** Anjana Sankar  
+- **Track:** Media  
+- **Problem Statement:**  
+  Great ideas often strike us at unexpected moments—while walking, showering, or chatting with a friend. But these ideas are frequently forgotten before they’re captured or developed. There’s no lightweight, accessible solution to quickly record and structure them into something actionable.
 
-Hear Me Out is a GenAI-powered tool that transforms fleeting voice or text ideas into structured pitch decks. Whether you're a founder in the making, a student, or simply someone who wants to preserve and polish their thoughts, this tool helps you document ideas in the form of ready-to-share presentation decks.
+- **Solution:**  
+  Hear Me Out is a GenAI-powered tool that helps you instantly document voice or text ideas and turn them into structured pitch decks. It ensures your fleeting thoughts aren’t lost but preserved in a form you can present, share, or develop further.
 
-## Features
+- **Project Description:**  
+  Users can either record their idea via voice or type it in. The backend uses Gemini AI to transcribe, interpret, and expand the idea into a structured 10-slide pitch deck. This is then converted into a presentation file and uploaded to Supabase, with a public link and metadata generated and stored.
 
-- Record your idea using voice
-- Type out your idea if you prefer text
-- Transcription and content structuring using Gemini AI
-- Automatically organizes content into a 10-slide pitch deck
-- Converts the deck into a downloadable PPT
-- Uploads to Supabase storage
-- Returns a public link to the deck and stores metadata in a Supabase table
+---
 
-## Tech Stack
+## Technical Details
 
-**Backend**  
-- FastAPI (Python)  
-- Google Generative AI (Gemini Pro, Text & Audio)   
-- Supabase ( Database and Storage)
+- **Tech Stack and Libraries Used:**
+  - **Backend:** FastAPI (Python), Google Generative AI (Gemini Pro – Text & Audio), Supabase (Database & Storage)
+  - **Frontend (Prototype):** Basic HTML + Tailwind CSS
+  - **Database Table:** `pitch_decks`  
+    - Fields: `company_name`, `tagline`, `original_idea`, `pdf_url`, `storage_path`
 
-**Frontend (Prototype)**  
-- Basic HTML + Tailwind CSS  
-- Plan to scale with React for a richer interface
+- **Implementation:**  
+  1. User inputs an idea (via audio or text).
+  2. Gemini AI transcribes audio and expands the content into a 10-slide pitch.
+  3. The generated deck is converted into a PPT file.
+  4. The file is uploaded to Supabase Storage.
+  5. A public link is returned, and metadata is stored in the database.
 
-**Database Table: `pitch_decks`**  
-- Fields: `company_name`, `tagline`, `original_idea`, `pdf_url`, `storage_path`
+---
 
-## How It Works
-
-1. The user records or types out their idea.
-2. The input is sent to Gemini AI to transcribe (if audio) and structure the content.
-3. A 10-slide pitch deck is generated.
-4. The content is formatted into a PDF.
-5. The PPT is uploaded to Supabase.
-6. A public link is returned, and metadata is stored.
-
-## Scalability and Future Scope
-
-- Multiple pitch deck templates based on context and tone
-- Google login and user authentication
-- Slide editing before PDF generation
-- Richer frontend for mobile and web platforms
-
-## Example Demo Idea
-
-**Startup Name:** FridgePal  
-Description: A smart fridge assistant that tracks your groceries, sends expiration alerts, and suggests recipes based on what's available.
-
-The user speaks this idea, and Hear Me Out generates a polished, themed pitch deck with title, problem, solution, market, monetization, and more.
-
-## Installation
+## Installation and Execution Instructions
 
 ```bash
 git clone https://github.com/yourusername/hearmeout
@@ -65,6 +44,19 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-Made with love by barbie.dev
+## Screenshots
+
+![WhatsApp Image 2025-07-20 at 12 27 29](https://github.com/user-attachments/assets/c51f41a2-f230-4c7d-b2e9-409bd81e6c4e)
+![WhatsApp Image 2025-07-20 at 12 26 54](https://github.com/user-attachments/assets/f9249863-e757-43a8-a8b2-e7f69f042a7a)
+![WhatsApp Image 2025-07-20 at 12 28 00](https://github.com/user-attachments/assets/3009644d-404c-462f-936e-0a33c375452c)
 
 
+
+
+## Project Demo Video (Optional)
+
+_Add a link to your video demo here (e.g., YouTube or Drive) that walks through how the app works end-to-end._
+
+---
+
+**Made with love ❤️ by barbie.dev**
